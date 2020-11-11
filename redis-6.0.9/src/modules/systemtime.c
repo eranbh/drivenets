@@ -5,8 +5,8 @@
 #include <unistd.h>
 #include "../redismodule.h"
 
-static int set_io_multiplexer();
-static int set_timer();
+static int setup_io_multiplexer();
+static int setup_timer();
 static int start_sys_time_collector_thread();
 
 static int s_epoll_fd = 0;
@@ -24,6 +24,7 @@ static pthread_mutex_t lock;
 int DrivenetsGetTime_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
 	REDISMODULE_NOT_USED(argv);
     REDISMODULE_NOT_USED(argc);
+	
 	// dont hold the lock for the ipc
 	pthread_mutex_lock(&lock);
 	long system_time_usec = s_system_time_usec;
@@ -39,14 +40,14 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     // means we are "open for business" which is not true yet
 
     // setup io multiplexer
-    if (0 != set_io_multiplexer()){
+    if (0 != setup_io_multiplexer()){
         // TODO report error
         // return
     }
 
     // setup time and timer related stuff
     // note: timer is _not_ armed here!
-    if (0 != set_timer()){
+    if (0 != setup_timer()){
         // TODO report error
         // return
     }
@@ -71,7 +72,7 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
 
 }
 
-int set_io_multiplexer()
+int setup_io_multiplexer()
 {
     // we want a multiplexer of size one.
     // just one timeout to manage
@@ -91,7 +92,7 @@ int set_io_multiplexer()
 	epoll_ctl(s_epoll_fd, EPOLL_CTL_ADD, s_timer_fd, &ev);
 }
 
-int set_timer()
+int setup_timer()
 {
     struct itimerspec its;
 	// according to time(7) the accuracy of systemcalls that set timers
@@ -133,7 +134,6 @@ void* collector_thread_work(void* user)
 
 	while(1)
 	{
-		
 		int fireEvents = epoll_wait(s_epoll_fd, events, 1, -1);
 		if(fireEvents > 0){
 			// the man states that timers can expire multiple times
@@ -145,11 +145,13 @@ void* collector_thread_work(void* user)
 				printf("read error!\n");
 				// TODO if not EAGAIN, break the loop
 			}
+			pthread_mutex_lock(&lock);
 			s_system_time_usec += exp * (jiffi_in_seconds * NANO_IN_SEC);
+			pthread_mutex_unlock(&lock);
 		}
 		else{
-			printf("fireEvents = %d", fireEvents);
-			// TODO break out of loop
+			printf("no events happened. stopping multiplexer");
+			break;
 		}
 	}
 }

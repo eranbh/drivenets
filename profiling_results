@@ -3,4 +3,4 @@ no formatting [just a timestamp]
 1. no sync at all (totally racy):
    cmdstat_drivenets.get.time:calls=18,usec=82,usec_per_call=4.56
 2. mutex [pthreads]:
-   cmdstat_drivenets.get.time:calls=41,usec=198,usec_per_call=4.83
+   cmdstat_drivenets.get.time:calls=29,usec=149,usec_per_call=5.14
