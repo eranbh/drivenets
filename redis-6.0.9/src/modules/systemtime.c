@@ -9,11 +9,12 @@ static int set_io_multiplexer();
 static int set_timer();
 static int start_sys_time_collector_thread();
 
-static int g_epoll_fd = 0;
-static int g_timer_fd = 0;
+static int s_epoll_fd = 0;
+static int s_timer_fd = 0;
 static const int NANO_IN_SEC = 1000000000;
-static long system_time_usec = 0;
+static long s_system_time_usec = 0;
 static double jiffi_in_seconds = 0.0;
+static pthread_mutex_t lock;
 
 /*
 * DRIVENETS.GET.TIME 
@@ -23,6 +24,11 @@ static double jiffi_in_seconds = 0.0;
 int DrivenetsGetTime_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
 	REDISMODULE_NOT_USED(argv);
     REDISMODULE_NOT_USED(argc);
+	// dont hold the lock for the ipc
+	pthread_mutex_lock(&lock);
+	long system_time_usec = s_system_time_usec;
+	pthread_mutex_unlock(&lock);
+	RedisModule_ReplyWithLongLong(ctx, system_time_usec);
 }
 
 int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
@@ -51,8 +57,17 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         // return
     }
 
+	// just for profiling against lock free stuff
+	if (pthread_mutex_init(&lock, NULL) != 0) { 
+        return REDISMODULE_ERR; 
+    } 
+
     if (RedisModule_Init(ctx,"drivenetsgettime",1,REDISMODULE_APIVER_1)
         == REDISMODULE_ERR) return REDISMODULE_ERR;
+
+	if (RedisModule_CreateCommand(ctx,"drivenets.get.time",
+        DrivenetsGetTime_RedisCommand,"readonly",0,0,0) == REDISMODULE_ERR)
+        return REDISMODULE_ERR;
 
 }
 
@@ -60,20 +75,20 @@ int set_io_multiplexer()
 {
     // we want a multiplexer of size one.
     // just one timeout to manage
-    g_epoll_fd = epoll_create(1);
+    s_epoll_fd = epoll_create(1);
  
 	/* create timer */
     // CLOCK_MONOTONIC is a good clock to use here, as its
     // man states that it is _not_ sensetive to changes
     // we want a non-blocking fd, so that we can avoid blocking
     // on the read when we leave the epoll on a _non_ timer related event
-	g_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+	s_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
 	
     // add the timer to the multiplexer
     struct epoll_event ev;
 	ev.events = EPOLLIN;
-	ev.data.fd = g_timer_fd;
-	epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, g_timer_fd, &ev);
+	ev.data.fd = s_timer_fd;
+	epoll_ctl(s_epoll_fd, EPOLL_CTL_ADD, s_timer_fd, &ev);
 }
 
 int set_timer()
@@ -94,7 +109,7 @@ int set_timer()
 	its.it_interval.tv_nsec = jiffi_in_seconds * NANO_IN_SEC;
 	its.it_value.tv_sec = 1; // we start aligned to a full second
 	its.it_value.tv_nsec = 0;
-	if (timerfd_settime(g_timer_fd, 0, &its, NULL) < 0)
+	if (timerfd_settime(s_timer_fd, 0, &its, NULL) < 0)
 		return -1;
 	return 0;
 }
@@ -112,12 +127,14 @@ void* collector_thread_work(void* user)
 	}
 	
 	// this is an attempt at getting the best resolution possible
-	system_time_usec = ts.tv_sec * NANO_IN_SEC + ts.tv_nsec;
+	pthread_mutex_lock(&lock);
+	s_system_time_usec = ts.tv_sec * NANO_IN_SEC + ts.tv_nsec;
+	pthread_mutex_unlock(&lock);
 
 	while(1)
 	{
 		
-		int fireEvents = epoll_wait(g_epoll_fd, events, 1, -1);
+		int fireEvents = epoll_wait(s_epoll_fd, events, 1, -1);
 		if(fireEvents > 0){
 			// the man states that timers can expire multiple times
 			// between the calls to read. to make up for that, we 
@@ -128,13 +145,12 @@ void* collector_thread_work(void* user)
 				printf("read error!\n");
 				// TODO if not EAGAIN, break the loop
 			}
-			system_time_usec += exp * (jiffi_in_seconds * NANO_IN_SEC);
+			s_system_time_usec += exp * (jiffi_in_seconds * NANO_IN_SEC);
 		}
 		else{
 			printf("fireEvents = %d", fireEvents);
 			// TODO break out of loop
 		}
-		//printf ("system_time_usec: %ld ,system_time_sec %ld\n", system_time_usec, system_time_usec / NANO_IN_SEC);
 	}
 }
 
