@@ -4,9 +4,14 @@ uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
 
 # Compile flags for linux / osx
 ifeq ($(uname_S),Linux)
-	# -std=c99 this seems to mess up the use of the clock api
-	# TODO find out y?
-	SHOBJ_CFLAGS ?= -W -Wall -fno-common -g -ggdb  -O2
+	# sync options:
+	# 1. __USE_ATOMICS
+	# 2. __USE_MUTEX
+	# formating options
+	# 1. (none): send back the full timestamp as a long integer
+	# 2. __USE_HUMAN_TIME: cut the timestamp down to secs and format as human str
+	# TODO -std=c99 this switch seems to mess up the use of the clock api. y??
+	SHOBJ_CFLAGS ?= -D__USE_ATOMICS -W -Wall -fno-common -g -ggdb  -O2
 	SHOBJ_LDFLAGS ?= -shared
 else
 	SHOBJ_CFLAGS ?= -W -Wall -dynamic -fno-common -g -ggdb -std=c99 -O2
