@@ -13,6 +13,7 @@ static int start_sys_time_collector_thread();
 static int s_epoll_fd = 0;
 static int s_timer_fd = 0;
 static const int NANO_IN_SEC = 1000000000;
+static const int MILLI_IN_SEC = 1000;
 static long s_system_time_usec = 0;
 static double jiffi_in_seconds = 0.0;
 static pthread_mutex_t lock;
@@ -32,7 +33,7 @@ static pthread_mutex_t lock;
 *
 * the user can choose the format of the output:
 * 1. -D__USE_HUMAN_TIME: will format the timestamp to a humanly readable
-*    string. _note_: this option is "losy" as it looses percision
+*    string. _note_: this option is expensive and "losy" as it looses percision
 *    when it cuts the timestamp down to seconds (the base needed by the
 *    formating functions)
 * 2. none: will return the full timestamp in nanos
@@ -190,7 +191,8 @@ void* collector_thread_work(void* user)
 
 	while(1)
 	{
-		int fireEvents = epoll_wait(s_epoll_fd, events, 1, -1);
+		// if the first timer didnt start in 40 seconds. something is wrong.
+		int fireEvents = epoll_wait(s_epoll_fd, events, 1, MILLI_IN_SEC * 40);
 		if(fireEvents > 0){
 			// the man states that timers can expire multiple times
 			// between the calls to read. to make up for that, we 

@@ -11,7 +11,7 @@ ifeq ($(uname_S),Linux)
 	# 1. (none): send back the full timestamp as a long integer
 	# 2. __USE_HUMAN_TIME: cut the timestamp down to secs and format as human str
 	# TODO -std=c99 this switch seems to mess up the use of the clock api. y??
-	SHOBJ_CFLAGS ?= -D__USE_ATOMICS -W -Wall -fno-common -g -ggdb  -O2
+	SHOBJ_CFLAGS ?= -D__USE_ATOMICS -D__USE_HUMAN_TIME -W -Wall -fno-common -g -ggdb  -O2
 	SHOBJ_LDFLAGS ?= -shared
 else
 	SHOBJ_CFLAGS ?= -W -Wall -dynamic -fno-common -g -ggdb -std=c99 -O2

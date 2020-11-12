@@ -1,6 +1,14 @@
-no formatting [just a timestamp]
+the baseline: hset table var[1-50] val
+cmdstat_hset:calls=20,usec=240,usec_per_call=12.00
 
-1. no sync at all (totally racy):
-   cmdstat_drivenets.get.time:calls=18,usec=82,usec_per_call=4.56
-2. mutex [pthreads]:
-   cmdstat_drivenets.get.time:calls=29,usec=149,usec_per_call=5.14
+no formatting [just a timestamp]
+1. mutex [__USE_MUTEX]
+   cmdstat_drivenets.get.time:calls=50,usec=221,usec_per_call=4.42
+2. atomics [__USE_ATOMICS]
+   cmdstat_drivenets.get.time:calls=50,usec=217,usec_per_call=4.34
+
+with formatting
+1. mutex [__USE_MUTEX, __USE_HUMAN_TIME]
+   cmdstat_drivenets.get.time:calls=50,usec=2003,usec_per_call=40.06
+2. atomics [__USE_ATOMICS ,__USE_HUMAN_TIME]
+   cmdstat_drivenets.get.time:calls=50,usec=1830,usec_per_call=36.60 
