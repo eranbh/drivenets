@@ -16,7 +16,9 @@ static const int NANO_IN_SEC = 1000000000;
 static const int MILLI_IN_SEC = 1000;
 static long s_system_time_usec = 0;
 static double jiffi_in_seconds = 0.0;
+#ifdef __USE_MUTEX
 static pthread_mutex_t lock;
+#endif
 
 /*
 * DRIVENETS.GET.TIME 
@@ -91,10 +93,11 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         return REDISMODULE_ERR;
     }
 
-	// just for profiling against lock free stuff
+#ifdef __USE_MUTEX
 	if (pthread_mutex_init(&lock, NULL) != 0) { 
         return REDISMODULE_ERR; 
-    } 
+    }
+#endif
 
     if (RedisModule_Init(ctx,"drivenetsgettime",1,REDISMODULE_APIVER_1) == REDISMODULE_ERR){
         printf("RedisModule_Init failed.\n");
