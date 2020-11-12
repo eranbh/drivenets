@@ -11,6 +11,8 @@ ifeq ($(uname_S),Linux)
 	# 1. (none): send back the full timestamp as a long integer
 	# 2. __USE_HUMAN_TIME: cut the timestamp down to secs and format as human str
 	# TODO -std=c99 this switch seems to mess up the use of the clock api. y??
+	# note: when changing switches here, you need to "touch" the code or the
+	#       build system provided by redis will not rebuild the products
 	SHOBJ_CFLAGS ?= -D__USE_ATOMICS -D__USE_HUMAN_TIME -W -Wall -fno-common -g -ggdb  -O2
 	SHOBJ_LDFLAGS ?= -shared
 else

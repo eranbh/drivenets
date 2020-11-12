@@ -32,3 +32,4 @@ open issues:
        are _not_ portable.
 3. logging goes to the console. need to log to a file.
 4. the formating option seems very expensive. need to investigate that.
+   if the baseline is hset, the current profiling shows this is twice as slow (on avarage)
