@@ -155,7 +155,11 @@ int setup_timer()
 	// one jiffi is equal to a kernel constat that indicates number of
 	// clock ticks per second.
 	// take this constant from the system as it is coupled to the os / hw versions
-	long hz = sysconf(_SC_CLK_TCK); // TODO check failure
+	long hz = sysconf(_SC_CLK_TCK);
+	if (0 > hz){
+		printf ("sysconf failed. errno: %d\n", errno);
+		return -1;
+	}
 	// one jiffi in seconds, is therefor:
 	jiffi_in_seconds = 1.0 / hz;
 
@@ -235,11 +239,11 @@ void* collector_thread_work(void* user)
 int start_sys_time_collector_thread()
 {
     pthread_t threadId = -1;
-	int sts = pthread_create(&threadId, NULL, &collector_thread_work, 0);
-	if (0 > sts){
-		printf ("pthread_create failed. errno: %d\n", errno);
-		return -1;
-	}
+    int sts = pthread_create(&threadId, NULL, &collector_thread_work, 0);
+    if (0 > sts){
+	    printf ("pthread_create failed. errno: %d\n", errno);
+	    return -1;
+    }
     // TODO where do i join with this?
-	return 0;
+    return 0;
 }
