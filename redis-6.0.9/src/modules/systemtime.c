@@ -87,17 +87,18 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         return REDISMODULE_ERR;
     }
 
-    // start the collector thread
-    if (0 > start_sys_time_collector_thread()){
-        printf("starting the collector thread failed.\n");
-        return REDISMODULE_ERR;
-    }
-
 #ifdef __USE_MUTEX
 	if (pthread_mutex_init(&lock, NULL) != 0) { 
         return REDISMODULE_ERR; 
     }
 #endif
+
+
+    // start the collector thread
+    if (0 > start_sys_time_collector_thread()){
+        printf("starting the collector thread failed.\n");
+        return REDISMODULE_ERR;
+    }
 
     if (RedisModule_Init(ctx,"drivenetsgettime",1,REDISMODULE_APIVER_1) == REDISMODULE_ERR){
         printf("RedisModule_Init failed.\n");
