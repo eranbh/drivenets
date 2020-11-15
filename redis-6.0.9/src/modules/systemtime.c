@@ -308,5 +308,5 @@ void convert_time_to_human_string(time_t time, char* buffer)
 		}
 	}
 
-	sprintf(buffer, "%d-%d-%d %d:%d:%d", days+1, month+1, year, hours+2, minutes, seconds);
+	sprintf(buffer, "%d-%d-%d %d:%d", days+1, month+1, year, hours+2, minutes);
 }
