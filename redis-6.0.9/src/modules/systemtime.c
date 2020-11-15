@@ -9,17 +9,33 @@
 static int setup_io_multiplexer(RedisModuleCtx *ctx);
 static int setup_timer(RedisModuleCtx *ctx);
 static int start_sys_time_collector_thread(RedisModuleCtx *ctx);
-static void convert_time_to_human_string(time_t seconds, char* buffer);
+static uint64_t init_time_components(time_t seconds);
+static void collector_handle_elapsed_time();
 
 static int s_epoll_fd = 0;
 static int s_timer_fd = 0;
 static const int NANO_IN_SEC = 1000000000;
 static const int MILLI_IN_SEC = 1000;
-static long s_system_time_usec = 0;
-static double jiffi_in_seconds = 0.0;
-#ifdef __USE_MUTEX
-static pthread_mutex_t lock;
-#endif
+//static long s_system_time_usec = 0;
+//static double jiffi_in_seconds = 0.0;
+static const uint8_t daysInMonth[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+static uint64_t s_time_components = 0;
+
+uint64_t SECONDS_MASK =   0x00000000000000FF; // 8bits
+uint64_t MINUTES_MASK =   0x000000000000FF00; // 8bits
+uint64_t HOURS_MASK   =   0x0000000000FF0000; // 8bits
+uint64_t DAYS_MASK    =   0x00000000FF000000; // 8bits
+uint64_t MONTHS_MASK  =   0x0000000F00000000; // 4bits
+uint64_t YEARS_MASK   =   0xFFFFFFF000000000; // rest of bits
+
+int SECONDS_OFFSET = 0;
+int MINUTES_OFFSET = 8;
+int HOURS_OFFSET   = 16;
+int DAYS_OFFSET    = 24;
+int MONTHS_OFFSET  = 32;
+int YEARS_OFFSET   = 36;
+
 
 /*
 * DRIVENETS.GET.TIME 
@@ -29,43 +45,27 @@ static pthread_mutex_t lock;
 * command api will sample _the register_ without calling an expensive
 * system call, or probing some hardware clock.
 * 
-* as there is an inherant race on the above register,
-* there are 2 modes with which this can be compiled:
-* 1. -D__USE_MUTEX: uses a pthreads mutex.
-* 2. -D__USE_ATOMICS: uses a gcc builtin atomic operation
-*
-* the user can choose the format of the output:
-* 1. -D__USE_HUMAN_TIME: will format the timestamp to a humanly readable
-*    string. _note_: this option is expensive and "losy" as it looses percision
-*    when it cuts the timestamp down to seconds (the base needed by the
-*    formating functions)
-* 2. none: will return the full timestamp in nanos
-*
 * profiling numbers are given for each build permutation in: profile_results
 */
 int DrivenetsGetTime_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
 	REDISMODULE_NOT_USED(argv);
     REDISMODULE_NOT_USED(argc);
 	
-	// dont hold the lock for the ipc
-	long system_time_usec = 0;
-#ifdef __USE_MUTEX
-	pthread_mutex_lock(&lock);
-	system_time_usec = s_system_time_usec;
-	pthread_mutex_unlock(&lock);
-#elif __USE_ATOMICS
-	__atomic_store(&system_time_usec, &s_system_time_usec, __ATOMIC_SEQ_CST);
-#endif
+	
+	uint64_t time_components = 0;
+	__atomic_load(&s_time_components, &time_components, __ATOMIC_SEQ_CST);
+
+	int minutes = time_components | (MINUTES_MASK>>MINUTES_OFFSET);
+	int hours =   time_components | (HOURS_MASK>>HOURS_OFFSET);
+	int days =    time_components | (DAYS_MASK>>DAYS_OFFSET);
+	int months =  time_components | (MONTHS_MASK>>MONTHS_MASK);
+	int years =   time_components | (YEARS_MASK>>YEARS_MASK);
 
 	///// send the result back.
-#ifdef __USE_HUMAN_TIME
+
 	char buffer [128] = {0};
-	time_t time = system_time_usec / NANO_IN_SEC;
-	convert_time_to_human_string(time, buffer);
+	sprintf(buffer, "%02d-%02d-%d %02d:%02d", days, months, years, hours, minutes);
 	RedisModule_ReplyWithCString(ctx, buffer);
-#else
-	RedisModule_ReplyWithLongLong(ctx, system_time_usec);
-#endif
 
 	return REDISMODULE_OK;
 }
@@ -89,14 +89,6 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
 		RedisModule_Log(ctx, "error", "setting up timer related stuff failed");
         return REDISMODULE_ERR;
     }
-
-#ifdef __USE_MUTEX
-	if (pthread_mutex_init(&lock, NULL) != 0) {
-		RedisModule_Log(ctx, "error", "pthread_mutex_init failed");
-        return REDISMODULE_ERR; 
-    }
-#endif
-
 
     // start the collector thread
     if (0 > start_sys_time_collector_thread(ctx)){
@@ -161,18 +153,18 @@ int setup_timer(RedisModuleCtx *ctx)
 	// one jiffi is equal to a kernel constat that indicates number of
 	// clock ticks per second.
 	// take this constant from the system as it is coupled to the os / hw versions
-	long hz = sysconf(_SC_CLK_TCK);
-	if (0 > hz){
-		RedisModule_Log(ctx, "error", "sysconf failed. errno: %d", errno);
-		return -1;
-	}
+	//long hz = sysconf(_SC_CLK_TCK);
+	//if (0 > hz){
+	//	RedisModule_Log(ctx, "error", "sysconf failed. errno: %d", errno);
+	//	return -1;
+	//}
 	// one jiffi in seconds, is therefor:
-	jiffi_in_seconds = 1.0 / hz;
+	//jiffi_in_seconds = 1.0 / hz;
 
 	//printf("jiffi_in_seconds: %f\n", jiffi_in_seconds);
  
-	its.it_interval.tv_sec = 0;
-	its.it_interval.tv_nsec = jiffi_in_seconds * NANO_IN_SEC;
+	its.it_interval.tv_sec = 1;
+	its.it_interval.tv_nsec = 0;//jiffi_in_seconds * NANO_IN_SEC;
 	its.it_value.tv_sec = 1; // we start aligned to a full second
 	its.it_value.tv_nsec = 0;
 	if (timerfd_settime(s_timer_fd, 0, &its, NULL) < 0){
@@ -196,13 +188,8 @@ void* collector_thread_work(void* user)
 	
 	// this is the first time we take a time sample
 	long curr_time = ts.tv_sec * NANO_IN_SEC + ts.tv_nsec;
-#ifdef __USE_MUTEX
-	pthread_mutex_lock(&lock);
-	s_system_time_usec = curr_time;
-	pthread_mutex_unlock(&lock);
-#elif __USE_ATOMICS
-	__atomic_store(&s_system_time_usec, &curr_time, __ATOMIC_SEQ_CST);
-#endif
+	uint64_t time_components = init_time_components(curr_time / NANO_IN_SEC);
+	__atomic_store(&s_time_components, &time_components, __ATOMIC_SEQ_CST);
 
 	while(1)
 	{
@@ -225,14 +212,9 @@ void* collector_thread_work(void* user)
 					continue;
 				}
 			}
-#ifdef __USE_MUTEX
-			pthread_mutex_lock(&lock);
-			s_system_time_usec += times_expired * (jiffi_in_seconds * NANO_IN_SEC);
-			pthread_mutex_unlock(&lock);
-#elif __USE_ATOMICS			
-			int delta = times_expired * (jiffi_in_seconds * NANO_IN_SEC);
-			__sync_add_and_fetch(&s_system_time_usec, delta);
-#endif
+
+			// TODO account for times_expired here
+			collector_handle_elapsed_time();
 		}
 		else{
 			// epoll_wait failed. only EINTR is recoverable
@@ -259,9 +241,11 @@ int start_sys_time_collector_thread(RedisModuleCtx *ctx)
     return 0;
 }
 
-void convert_time_to_human_string(time_t time, char* buffer)
+
+// calculates broken down time. im using this as 
+uint64_t init_time_components(time_t time)
 {
-	uint32_t seconds, minutes, hours, days, year, month;
+	uint64_t seconds, minutes, hours, days, year, month;
 
 	seconds = time;
 
@@ -290,7 +274,6 @@ void convert_time_to_human_string(time_t time, char* buffer)
 		else
 		{
 			/* calculate the month and day */
-			static const uint8_t daysInMonth[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 			for(month = 0; month < 12; ++month)
 			{
 				uint8_t dim = daysInMonth[month];
@@ -308,5 +291,71 @@ void convert_time_to_human_string(time_t time, char* buffer)
 		}
 	}
 
-	sprintf(buffer, "%d-%d-%d %d:%d", days+1, month+1, year, hours+2, minutes);
+	uint64_t current_time = 0;
+	current_time |= seconds;
+	current_time |= (minutes<<MINUTES_OFFSET);
+	current_time |= ((hours+2)<<HOURS_OFFSET);
+	current_time |= ((days+1)<<DAYS_OFFSET);
+	current_time |= ((month+1)<<MONTHS_OFFSET);
+	current_time |= (year<<YEARS_OFFSET);
+
+	printf("bla bla %ld\n", seconds);
+	printf("bla bla %ld\n", minutes);
+	printf("bla bla %ld\n", hours+2);
+	printf("bla bla %ld\n", days+1);
+	printf("bla bla %ld\n", month+1);
+	printf("bla bla %ld\n", year);
+
+	printf ("curr time: %ld\n", current_time);
+	
+	return current_time;
+}
+
+int inc_time_component(uint64_t* time_components, uint64_t mask, int offset, uint64_t limit)
+{
+	uint64_t val = (*time_components) & mask;
+	int spill_over = 0;
+	val = val>>offset;
+	if (limit == val) {
+		val = 0;
+		spill_over = 1;
+	}else{
+		val++;
+	}
+	val = val<<offset;
+	(*time_components) |= val;
+	return spill_over;
+}
+
+
+// this function is called with a single second resolution
+void collector_handle_elapsed_time()
+{
+	uint64_t current_time = 0;
+	__atomic_load(&s_time_components, &current_time, __ATOMIC_SEQ_CST);
+	
+	int spill_over = inc_time_component(&current_time, SECONDS_MASK, SECONDS_OFFSET, 59);
+	if(spill_over){
+		spill_over = inc_time_component(&current_time, MINUTES_MASK, MINUTES_OFFSET, 59);
+	}else {return;}
+
+	if(spill_over){
+		spill_over = inc_time_component(&current_time, HOURS_MASK, HOURS_OFFSET, 23);
+	}else {return;}
+
+	if(spill_over){
+		int month = (current_time & MONTHS_MASK) >> MONTHS_OFFSET;
+		int mum_of_days_in_month = daysInMonth[month -1];
+		spill_over = inc_time_component(&current_time, DAYS_MASK, DAYS_OFFSET, mum_of_days_in_month);
+	}else {return;}
+
+	if(spill_over){
+		spill_over = inc_time_component(&current_time, MONTHS_MASK, MONTHS_OFFSET, 12);
+	}else {return;}
+
+	if(spill_over){
+		// handle leap years
+		spill_over = inc_time_component(&current_time, YEARS_MASK, YEARS_OFFSET, 3000);
+	}
+	__atomic_store(&current_time, &s_time_components, __ATOMIC_SEQ_CST);
 }
