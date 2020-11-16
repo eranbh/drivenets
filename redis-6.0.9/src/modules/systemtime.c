@@ -240,7 +240,7 @@ void convert_time_to_human_string(time_t time, char* buffer)
 	sprintf(buffer, "%02d-%02d-%d %02d:%02d",
 	                             broken_down->tm_mday,
 							     broken_down->tm_mon,
-								 broken_down->tm_year,
+								 broken_down->tm_year + 1900,
 								 broken_down->tm_hour,
 								 broken_down->tm_min);
 }
