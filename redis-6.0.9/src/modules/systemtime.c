@@ -4,6 +4,8 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 #include "../redismodule.h"
 
 static int setup_io_multiplexer(RedisModuleCtx *ctx);
@@ -19,6 +21,7 @@ static long s_system_time_usec = 0;
 static double jiffi_in_seconds = 0.0;
 #ifdef __USE_MUTEX
 static pthread_mutex_t lock;
+static char s_formated_time_buffer [32];
 #endif
 
 /*
@@ -48,20 +51,23 @@ int DrivenetsGetTime_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     REDISMODULE_NOT_USED(argc);
 	
 	// dont hold the lock for the ipc
+	char buffer[32] = {0};
 	long system_time_usec = 0;
 #ifdef __USE_MUTEX
 	pthread_mutex_lock(&lock);
 	system_time_usec = s_system_time_usec;
+	memcpy(buffer, s_formated_time_buffer, 32);
 	pthread_mutex_unlock(&lock);
 #elif __USE_ATOMICS
 	__atomic_store(&system_time_usec, &s_system_time_usec, __ATOMIC_SEQ_CST);
+#ifdef __USE_HUMAN_TIME
+	convert_time_to_human_string(system_time_usec / NANO_IN_SEC, buffer);
+#endif
 #endif
 
 	///// send the result back.
 #ifdef __USE_HUMAN_TIME
-	char buffer [128] = {0};
-	time_t time = system_time_usec / NANO_IN_SEC;
-	convert_time_to_human_string(time, buffer);
+	
 	RedisModule_ReplyWithCString(ctx, buffer);
 #else
 	RedisModule_ReplyWithLongLong(ctx, system_time_usec);
@@ -228,6 +234,7 @@ void* collector_thread_work(void* user)
 #ifdef __USE_MUTEX
 			pthread_mutex_lock(&lock);
 			s_system_time_usec += times_expired * (jiffi_in_seconds * NANO_IN_SEC);
+			convert_time_to_human_string(s_system_time_usec / NANO_IN_SEC, s_formated_time_buffer);
 			pthread_mutex_unlock(&lock);
 #elif __USE_ATOMICS			
 			int delta = times_expired * (jiffi_in_seconds * NANO_IN_SEC);
@@ -308,5 +315,5 @@ void convert_time_to_human_string(time_t time, char* buffer)
 		}
 	}
 
-	sprintf(buffer, "%d-%d-%d %d:%d", days+1, month+1, year, hours+2, minutes);
+	sprintf(buffer, "%02d-%02d-%d %02d:%02d", days+1, month+1, year, hours+2, minutes);
 }

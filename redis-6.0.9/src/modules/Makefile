@@ -13,7 +13,7 @@ ifeq ($(uname_S),Linux)
 	# TODO -std=c99 this switch seems to mess up the use of the clock api. y??
 	# note: when changing switches here, you need to "touch" the code or the
 	#       build system provided by redis will not rebuild the products
-	SHOBJ_CFLAGS ?= -D__USE_ATOMICS -D__USE_HUMAN_TIME -W -Wall -fno-common -g -ggdb  -O2
+	SHOBJ_CFLAGS ?= -D__USE_MUTEX -D__USE_HUMAN_TIME  -W -Wall -fno-common -g -ggdb  -O2
 	SHOBJ_LDFLAGS ?= -shared
 else
 	SHOBJ_CFLAGS ?= -W -Wall -dynamic -fno-common -g -ggdb -std=c99 -O2
