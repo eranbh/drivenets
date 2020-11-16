@@ -11,7 +11,9 @@
 static int setup_io_multiplexer(RedisModuleCtx *ctx);
 static int setup_timer(RedisModuleCtx *ctx);
 static int start_sys_time_collector_thread(RedisModuleCtx *ctx);
+#ifdef __USE_HUMAN_TIME
 static void convert_time_to_human_string(time_t seconds, char* buffer);
+#endif
 
 static int s_epoll_fd = 0;
 static int s_timer_fd = 0;
@@ -51,8 +53,8 @@ int DrivenetsGetTime_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     REDISMODULE_NOT_USED(argc);
 	
 	// dont hold the lock for the ipc
-	char buffer[32] = {0};
 	long system_time_usec = 0;
+	char buffer[32] = {0};
 #ifdef __USE_MUTEX
 	pthread_mutex_lock(&lock);
 	system_time_usec = s_system_time_usec;
@@ -266,6 +268,7 @@ int start_sys_time_collector_thread(RedisModuleCtx *ctx)
     return 0;
 }
 
+#ifdef __USE_HUMAN_TIME
 void convert_time_to_human_string(time_t time, char* buffer)
 {
 	uint32_t seconds, minutes, hours, days, year, month;
@@ -317,3 +320,4 @@ void convert_time_to_human_string(time_t time, char* buffer)
 
 	sprintf(buffer, "%02d-%02d-%d %02d:%02d", days+1, month+1, year, hours+2, minutes);
 }
+#endif

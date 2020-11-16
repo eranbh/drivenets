@@ -11,8 +11,4 @@ with formatting
 1. mutex [__USE_MUTEX, __USE_HUMAN_TIME]
    cmdstat_drivenets.get.time:calls=50,usec=261,usec_per_call=5.22
 2. atomics [__USE_ATOMICS ,__USE_HUMAN_TIME]
-   cmdstat_drivenets.get.time:calls=50,usec=1830,usec_per_call=36.60
-
-with manual formating
-1. atomics [__USE_ATOMICS, __USE_HUMAN_TIME]
-   cmdstat_drivenets.get.time:calls=50,usec=580,usec_per_call=11.60
+   cmdstat_drivenets.get.time:calls=50,usec=603,usec_per_call=12.06
