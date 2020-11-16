@@ -1,14 +1,5 @@
 the baseline: hset table var[1-50] val
 cmdstat_hset:calls=20,usec=240,usec_per_call=12.00
 
-no formatting [just a timestamp]
-1. mutex [__USE_MUTEX]
-   cmdstat_drivenets.get.time:calls=50,usec=221,usec_per_call=4.42
-2. atomics [__USE_ATOMICS]
-   cmdstat_drivenets.get.time:calls=50,usec=217,usec_per_call=4.34
-
-with formatting
-1. mutex [__USE_MUTEX, __USE_HUMAN_TIME]
-   cmdstat_drivenets.get.time:calls=50,usec=261,usec_per_call=5.22
-2. atomics [__USE_ATOMICS ,__USE_HUMAN_TIME]
-   cmdstat_drivenets.get.time:calls=50,usec=603,usec_per_call=12.06
+mutex + full formating:
+cmdstat_drivenets.get.time:calls=50,usec=249,usec_per_call=4.98

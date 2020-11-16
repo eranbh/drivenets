@@ -11,9 +11,8 @@
 static int setup_io_multiplexer(RedisModuleCtx *ctx);
 static int setup_timer(RedisModuleCtx *ctx);
 static int start_sys_time_collector_thread(RedisModuleCtx *ctx);
-#ifdef __USE_HUMAN_TIME
 static void convert_time_to_human_string(time_t seconds, char* buffer);
-#endif
+
 
 static int s_epoll_fd = 0;
 static int s_timer_fd = 0;
@@ -21,31 +20,21 @@ static const int NANO_IN_SEC = 1000000000;
 static const int MILLI_IN_SEC = 1000;
 static long s_system_time_usec = 0;
 static double jiffi_in_seconds = 0.0;
-#ifdef __USE_MUTEX
 static pthread_mutex_t lock;
-static char s_formated_time_buffer [32];
-#endif
+static char s_formated_time_buffer[64];
+
 
 /*
-* DRIVENETS.GET.TIME 
+* DRIVENETS.GET.TIME
 * this is an implementation of an efficient get-system-time mechanism
 * the idea is to use an internal thread that will "collect" the time
 * passing into a static register. once a time sample is required, the
 * command api will sample _the register_ without calling an expensive
 * system call, or probing some hardware clock.
-* 
-* as there is an inherant race on the above register,
-* there are 2 modes with which this can be compiled:
-* 1. -D__USE_MUTEX: uses a pthreads mutex.
-* 2. -D__USE_ATOMICS: uses a gcc builtin atomic operation
 *
-* the user can choose the format of the output:
-* 1. -D__USE_HUMAN_TIME: will format the timestamp to a humanly readable
-*    string. _note_: this option is expensive and "losy" as it looses percision
-*    when it cuts the timestamp down to seconds (the base needed by the
-*    formating functions)
-* 2. none: will return the full timestamp in nanos
-*
+* the main idea is to move all the heavy lifting into the collector thread.
+* the thread executing the command will simply copy a - pre formatted - buffer
+* and send it via the redis internal ipc
 * profiling numbers are given for each build permutation in: profile_results
 */
 int DrivenetsGetTime_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
@@ -53,28 +42,14 @@ int DrivenetsGetTime_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     REDISMODULE_NOT_USED(argc);
 	
 	// dont hold the lock for the ipc
-	long system_time_usec = 0;
-	char buffer[32] = {0};
-#ifdef __USE_MUTEX
+	char buffer[64] = {0};
 	pthread_mutex_lock(&lock);
-	system_time_usec = s_system_time_usec;
-	memcpy(buffer, s_formated_time_buffer, 32);
+	memcpy(buffer, s_formated_time_buffer, 64);
 	pthread_mutex_unlock(&lock);
-#elif __USE_ATOMICS
-	__atomic_store(&system_time_usec, &s_system_time_usec, __ATOMIC_SEQ_CST);
-#ifdef __USE_HUMAN_TIME
-	convert_time_to_human_string(system_time_usec / NANO_IN_SEC, buffer);
-#endif
-#endif
 
 	///// send the result back.
-#ifdef __USE_HUMAN_TIME
 	
 	RedisModule_ReplyWithCString(ctx, buffer);
-#else
-	RedisModule_ReplyWithLongLong(ctx, system_time_usec);
-#endif
-
 	return REDISMODULE_OK;
 }
 
@@ -98,13 +73,10 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         return REDISMODULE_ERR;
     }
 
-#ifdef __USE_MUTEX
 	if (pthread_mutex_init(&lock, NULL) != 0) {
 		RedisModule_Log(ctx, "error", "pthread_mutex_init failed");
         return REDISMODULE_ERR; 
     }
-#endif
-
 
     // start the collector thread
     if (0 > start_sys_time_collector_thread(ctx)){
@@ -204,13 +176,10 @@ void* collector_thread_work(void* user)
 	
 	// this is the first time we take a time sample
 	long curr_time = ts.tv_sec * NANO_IN_SEC + ts.tv_nsec;
-#ifdef __USE_MUTEX
+
 	pthread_mutex_lock(&lock);
 	s_system_time_usec = curr_time;
 	pthread_mutex_unlock(&lock);
-#elif __USE_ATOMICS
-	__atomic_store(&s_system_time_usec, &curr_time, __ATOMIC_SEQ_CST);
-#endif
 
 	while(1)
 	{
@@ -233,15 +202,11 @@ void* collector_thread_work(void* user)
 					continue;
 				}
 			}
-#ifdef __USE_MUTEX
+
 			pthread_mutex_lock(&lock);
 			s_system_time_usec += times_expired * (jiffi_in_seconds * NANO_IN_SEC);
 			convert_time_to_human_string(s_system_time_usec / NANO_IN_SEC, s_formated_time_buffer);
 			pthread_mutex_unlock(&lock);
-#elif __USE_ATOMICS			
-			int delta = times_expired * (jiffi_in_seconds * NANO_IN_SEC);
-			__sync_add_and_fetch(&s_system_time_usec, delta);
-#endif
 		}
 		else{
 			// epoll_wait failed. only EINTR is recoverable
@@ -268,56 +233,14 @@ int start_sys_time_collector_thread(RedisModuleCtx *ctx)
     return 0;
 }
 
-#ifdef __USE_HUMAN_TIME
 void convert_time_to_human_string(time_t time, char* buffer)
 {
-	uint32_t seconds, minutes, hours, days, year, month;
-
-	seconds = time;
-
-	/* calculate minutes */
-	minutes  = seconds / 60;
-	seconds -= minutes * 60;
-	/* calculate hours */
-	hours    = minutes / 60;
-	minutes -= hours   * 60;
-	/* calculate days */
-	days     = hours   / 24;
-	hours   -= days    * 24;
-
-	/* Unix time starts in 1970 on a Thursday */
-	year      = 1970;
-
-	while(1)
-	{
-		int leapYear   = (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
-		uint16_t daysInYear = leapYear ? 366 : 365;
-		if (days >= daysInYear)
-		{
-			days -= daysInYear;
-			++year;
-		}
-		else
-		{
-			/* calculate the month and day */
-			static const uint8_t daysInMonth[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-			for(month = 0; month < 12; ++month)
-			{
-				uint8_t dim = daysInMonth[month];
-
-				/* add a day to feburary if this is a leap year */
-				if (month == 1 && leapYear)
-					++dim;
-
-				if (days >= dim)
-					days -= dim;
-				else
-					break;
-			}
-			break;
-		}
-	}
-
-	sprintf(buffer, "%02d-%02d-%d %02d:%02d", days+1, month+1, year, hours+2, minutes);
+	// returns a pointer to static mem!! always call from a safe context!!
+	struct tm* broken_down = localtime(&time); 
+	sprintf(buffer, "%02d-%02d-%d %02d:%02d",
+	                             broken_down->tm_mday,
+							     broken_down->tm_mon,
+								 broken_down->tm_year,
+								 broken_down->tm_hour,
+								 broken_down->tm_min);
 }
-#endif
